@@ -72,17 +72,18 @@ namespace Cover_Maker
             }
         }
 
-        public static void DetectFace(Mat image, out Rectangle[] faces)
+        public static void DetectFace(Image<Bgr, byte> image, out List<Rectangle> faces)
         {
-            faces = null;
             CascadeClassifier cascadeClassifier = new CascadeClassifier(Constants.HAARCASCADE_FRONTALCATFACE);
-            using (var imageFrame = image.ToImage<Bgr, Byte>())
+            using (var imageFrame = image.Clone())
             {
                 if (imageFrame != null)
                 {
                     var grayframe = imageFrame.Convert<Gray, byte>();
-                    faces = cascadeClassifier.DetectMultiScale(grayframe, 1.1, 10, Size.Empty); //the actual face detection happens here
+                    faces = cascadeClassifier.DetectMultiScale(grayframe, 1.1, 10, Size.Empty).ToList(); //the actual face detection happens here
                 }
+                else
+                    faces = new List<Rectangle>();
             }
         }
     }

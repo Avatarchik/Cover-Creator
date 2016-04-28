@@ -9,12 +9,16 @@ using System.Threading.Tasks;
 
 namespace Cover_Maker
 {
-    class ImageWapper
+    public class ImageWapper
     {
-        Image<Bgr, byte> originalImage;
-        Rectangle[] originalFaces;
+        public Image<Bgr, byte> originalImage;
+        public List<Rectangle> originalFaces = new List<Rectangle>();
+        public List<bool> bChecked = new List<bool>();
 
-        Image<Bgr, byte> resizedImage;
-        Rectangle[] resizedFaces;
+        public Image<Bgr, byte> resizedImage;
+        public List<Rectangle> resizedFaces;
+
+
+        public string filepath;
     }
 }

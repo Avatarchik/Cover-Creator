@@ -14,16 +14,25 @@ using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
 using Emgu.CV.UI;
 using System.IO;
+using System.Diagnostics;
 
 namespace Cover_Maker
 {
     public partial class MainForm : Form
     {
-
+        private HashSet<string> filepathSet = new HashSet<string>();
+        private Boolean bFaceCheckedChangedBySystem = false;
+        private int nFaces = 0;
 
         public MainForm()
         {
             InitializeComponent();
+            if (Properties.Settings.Default.filepaths == null)
+                Properties.Settings.Default.filepaths = new System.Collections.Specialized.StringCollection();
+            foreach (string filepath in Properties.Settings.Default.filepaths)
+            {
+                addFile(filepath);
+            }
 
             fbCoverBtn_Click(null, null);
         }
@@ -46,6 +55,7 @@ namespace Cover_Maker
                     addFile(filePath);
                 }
             }
+            Properties.Settings.Default.Save();
         }
 
         private void imageFileListView_ItemSelectionChanged(object sender, ListViewItemSelectionChangedEventArgs e)
@@ -57,17 +67,33 @@ namespace Cover_Maker
             if (e.Item != null)
             {
                 iCurrentSelectedItem = e.ItemIndex;
-                originalImageBox.Image = (Mat)e.Item.Tag;
-                if (e.Item.SubItems[4].Tag != null)
+
+                // draw the rectangle on the image
+                bFaceCheckedChangedBySystem = true;
+
+                ImageWapper imageWapper = (ImageWapper)e.Item.Tag;
+                var image = imageWapper.originalImage.Clone();
+                faceImageList.Images.Clear();
+                faceListView.Items.Clear();
+                for (int i = 0; i < imageWapper.originalFaces.Count; i++)
                 {
-                    imgEntrada = ((Mat)e.Item.Tag).ToImage<Bgr, byte>();
-                    imgEntrada.ROI = (Rectangle)e.Item.SubItems[4].Tag;
-                    faceImageBox.Image = imgEntrada;
+                    Rectangle face = imageWapper.originalFaces[i];
+                    image.Draw(face, new Bgr(0, 0, 255), image.Width > image.Height ? image.Height / 200 : image.Width / 200);
+                    Image<Bgr, byte> aFace = new Image<Bgr, byte>(new Size(face.Width, face.Height));
+                    image.ROI = face;
+                    image.CopyTo(aFace);
+                    image.ROI = Rectangle.Empty;
+                    faceImageList.Images.Add(aFace.ToBitmap());
+
+                    ListViewItem item = new ListViewItem();
+                    item.ImageIndex = faceImageList.Images.Count - 1; // use the last inserted
+                    item.Checked = imageWapper.bChecked[i];
+                    faceListView.Items.Add(item);
                 }
-                else
-                {
-                    faceImageBox.Image = null;
-                }
+
+
+                originalImageBox.Image = image;
+                bFaceCheckedChangedBySystem = false;
             }
         }
 
@@ -75,14 +101,22 @@ namespace Cover_Maker
         {
             try
             {
-                Mat img = CvInvoke.Imread(filePath, Emgu.CV.CvEnum.LoadImageType.AnyColor);
-                if (img != null)
+                if (filepathSet.Add(filePath))
                 {
-                    string dimension = String.Format("{0}x{1}", img.Width, img.Height);
-                    FileInfo info = new FileInfo(filePath);
-                    ListViewItem item = new ListViewItem(new string[] { info.Name, info.Directory.FullName, dimension, info.Extension, "" });
-                    item.Tag = img;
-                    imageFileListView.Items.Add(item);
+                    Image<Bgr, byte> image = new Image<Bgr, byte>(filePath);
+                    if (image != null)
+                    {
+                        string dimension = String.Format("{0}x{1}", image.Width, image.Height);
+                        FileInfo info = new FileInfo(filePath);
+                        ListViewItem item = new ListViewItem(new string[] { info.Name, info.Directory.FullName, dimension, info.Extension, "" });
+                        ImageWapper imageWapper = new ImageWapper();
+                        imageWapper.filepath = filePath;
+                        imageWapper.originalImage = image;
+                        item.Tag = imageWapper;
+                        inputFileListView.Items.Add(item);
+                    }
+                    else
+                        filepathSet.Remove(filePath);
                 }
             }
             catch (Exception ex)
@@ -93,7 +127,8 @@ namespace Cover_Maker
 
         private void removeAllToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            imageFileListView.Items.Clear();
+            inputFileListView.Items.Clear();
+            filepathSet.Clear();
         }
 
         private void openFilesToolStripMenuItem_Click(object sender, EventArgs e)
@@ -135,7 +170,6 @@ namespace Cover_Maker
         {
             if (iCurrentSelectedItem < 0)
                 return;
-            #region SETS COORDINATES AT INPUT IMAGE BOX
             int X0, Y0;
             Utilities.ConvertCoordinates(originalImageBox, out X0, out Y0, e.X, e.Y);
             labelPostionXY.Text = String.Format("Last Position: X:{0}  Y:{1}", X0, Y0);
@@ -146,9 +180,7 @@ namespace Cover_Maker
             Point tempEndPoint = e.Location;
             Rect.Location = new Point(Math.Min(RectStartPoint.X, tempEndPoint.X), Math.Min(RectStartPoint.Y, tempEndPoint.Y));
             Rect.Size = new Size(Math.Abs(RectStartPoint.X - tempEndPoint.X), Math.Abs(RectStartPoint.Y - tempEndPoint.Y));
-            #endregion
 
-            #region SETS COORDINATES AT REAL IMAGE
             //Coordinates at real image - Create ROI
             Utilities.ConvertCoordinates(originalImageBox, out X0, out Y0, RectStartPoint.X, RectStartPoint.Y);
             int X1, Y1;
@@ -156,11 +188,9 @@ namespace Cover_Maker
             RealImageRect.Location = new Point(Math.Min(X0, X1), Math.Min(Y0, Y1));
             RealImageRect.Size = new Size(Math.Abs(X0 - X1), Math.Abs(Y0 - Y1));
 
-            imgEntrada = ((Mat)imageFileListView.SelectedItems[0].Tag).ToImage<Bgr, Byte>();
+            imgEntrada = ((ImageWapper)inputFileListView.SelectedItems[0].Tag).originalImage.Clone();
             imgEntrada.Draw(RealImageRect, new Bgr(Color.Red), thickness);
             originalImageBox.Image = imgEntrada;
-            #endregion
-
             ((PictureBox)sender).Invalidate();
         }
 
@@ -170,8 +200,8 @@ namespace Cover_Maker
             {
                 imgEntrada.ROI = RealImageRect;
                 faceImageBox.Image = imgEntrada;
-                imageFileListView.Items[iCurrentSelectedItem].SubItems[4].Text = imgEntrada.ROI.ToString();
-                imageFileListView.Items[iCurrentSelectedItem].SubItems[4].Tag = imgEntrada.ROI;
+                inputFileListView.Items[iCurrentSelectedItem].SubItems[4].Text = imgEntrada.ROI.ToString();
+                inputFileListView.Items[iCurrentSelectedItem].SubItems[4].Tag = imgEntrada.ROI;
             }
         }
 
@@ -186,36 +216,45 @@ namespace Cover_Maker
         #region DETECT FACE
         private void findFaceBtn_Click(object sender, EventArgs e)
         {
-            if (imageFileListView.SelectedItems.Count > 0)
+            if (inputFileListView.SelectedItems.Count > 0)
             {
-                var item = imageFileListView.SelectedItems[0];
+                var item = inputFileListView.SelectedItems[0];
                 DetectFace(item);
             }
         }
 
         private void DetectFace(ListViewItem item)
         {
+            BackgroundWorker bw = new BackgroundWorker();
             item.SubItems[4].Text = "Finding...";
+            bw.DoWork += detectFaceBackgroundWork_DoWork;
+            bw.RunWorkerCompleted += detectFaceBackgroundWork_RunWorkerCompleted;
+            bw.RunWorkerAsync(item);
+        }
 
-            Rectangle[] faces = null;
-            Utilities.DetectFace((Mat)item.Tag, out faces);
+        void detectFaceBackgroundWork_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            ListViewItem item = (ListViewItem)e.Result;
+            int nFaces = (int)item.SubItems[4].Tag;
+            item.SubItems[4].Text = item.SubItems[4].Tag + " / " + item.SubItems[4].Tag;
+        }
 
-            if (faces != null && faces.Length > 0)
-            {
-                item.SubItems[4].Tag = faces[0];
-                item.SubItems[4].Text = faces[0].ToString();
-                imageBox_MouseUp(null, null);
-            }
-            else
-            {
-                item.SubItems[4].Tag = null;
-                item.SubItems[4].Text = "Not found";
-            }
+        void detectFaceBackgroundWork_DoWork(object sender, DoWorkEventArgs e)
+        {
+            ListViewItem item = (ListViewItem)e.Argument;
+            List<Rectangle> faces = null;
+            Utilities.DetectFace(((ImageWapper)item.Tag).originalImage, out faces);
+            ((ImageWapper)item.Tag).originalFaces = faces;
+            for (int i = 0; i < faces.Count; i++)
+                ((ImageWapper)item.Tag).bChecked.Add(true);
+            item.SubItems[4].Tag = faces.Count;
+            e.Result = item;
+
         }
 
         private void findAllFacesBtn_Click(object sender, EventArgs e)
         {
-            foreach (ListViewItem item in imageFileListView.Items)
+            foreach (ListViewItem item in inputFileListView.Items)
             {
                 DetectFace(item);
             }
@@ -226,41 +265,44 @@ namespace Cover_Maker
 
         private void createCover_Click(object sender, EventArgs e)
         {
-            Image<Bgr, byte> cover = new Image<Bgr, byte>(new Size((int)widthEdit.Value, (int)heightEdit.Value));
             int nFaces = 0;
-            foreach (ListViewItem item in imageFileListView.Items)
+            foreach (ListViewItem item in inputFileListView.Items)
             {
-                Rectangle roi = (Rectangle)item.SubItems[4].Tag;
-                if (roi == null)
+                if (item.SubItems[4].Tag == null)
                     continue;
-                else nFaces++;
+                nFaces += (int)item.SubItems[4].Tag;
             }
 
             int w = (int)widthEdit.Value / nFaces;
 
             int iFace = 0;
-            foreach (ListViewItem item in imageFileListView.Items)
+
+            croppedFaceImageList.Images.Clear();
+            croppeFaceListView.Items.Clear();
+            for (int i = 0; i < inputFileListView.Items.Count; i++)
             {
-                Rectangle rectFace = (Rectangle)item.SubItems[4].Tag;
-                if (rectFace == null)
-                    continue;
-                var image = ((Mat)item.Tag).ToImage<Bgr, byte>();
-                int tempW = (int)(rectFace.Width * Constants.FACE_RATIO_HORIZONTAL);
+                ImageWapper item = (ImageWapper)inputFileListView.Items[i].Tag;
+                foreach (Rectangle rectFace in item.originalFaces)
+                {
+                    if (rectFace == null)
+                        continue;
+                    var image = item.originalImage;
+                    int tempW = (int)(rectFace.Width * Constants.FACE_RATIO_HORIZONTAL);
 
-                double r = w / tempW;
-                image = image.Resize(r, Inter.Cubic);
-                Rectangle rectCrop = new Rectangle((int)(rectFace.Right * r + rectFace.Left * r - w) / 2, 0, w, image.Height);
-                image.ROI = rectCrop;
-                ImageShowcase showCase = new ImageShowcase();
-                showCase.imageBox.Image = image;
-                showCase.Size = new Size(image.Size.Width + 50, image.Size.Height + 50);
-                showCase.Show();
-
-                cover.ROI = new Rectangle(iFace * w, 0, w, image.Height);
-                Image<Gray, byte> mask = new Image<Gray, byte>(cover.ROI.Width, cover.ROI.Height);
-                mask.SetValue(1);
-                CvInvoke.cvCopy(image, cover, mask);
-                iFace++;
+                    double r = (double)w / tempW;
+                    image = image.Resize(r, Inter.Cubic);
+                    Rectangle rectCrop = new Rectangle((int)(rectFace.Right * r + rectFace.Left * r - w) / 2, 0, w, image.Height);
+                    image.ROI = rectCrop;
+                    //ImageShowcase showCase = new ImageShowcase();
+                    //showCase.imageBox.Image = image;
+                    //showCase.Size = new Size(image.Size.Width + 50, image.Size.Height + 50);
+                    //showCase.Show();
+                    croppedFaceImageList.Images.Add(image.ToBitmap());
+                    ListViewItem it = new ListViewItem();
+                    it.ImageIndex = croppedFaceImageList.Images.Count - 1;
+                    croppeFaceListView.Items.Add(it);
+                    iFace++;
+                }
             }
         }
 
@@ -268,6 +310,75 @@ namespace Cover_Maker
         {
             heightEdit.Value = Constants.FB_COVER_HEIGHT;
             widthEdit.Value = Constants.FB_COVER_WIDTH;
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            Properties.Settings.Default.filepaths.Clear();
+            foreach (ListViewItem item in inputFileListView.Items)
+            {
+                Properties.Settings.Default.filepaths.Add(((ImageWapper)item.Tag).filepath);
+            }
+            Properties.Settings.Default.Save();
+        }
+
+        #region FACE LIST VIEW
+        private void faceListView_ItemSelectionChanged(object sender, ListViewItemSelectionChangedEventArgs e)
+        {
+
+        }
+
+        private void faceListView_KeyPress(object sender, KeyPressEventArgs e)
+        {
+
+        }
+
+        private void deleteFaceBtn_Click(object sender, EventArgs e)
+        {
+            for (int i = 0; i < faceListView.Items.Count; i++)
+            {
+                ListViewItem item = faceListView.Items[i];
+                if (item.Selected)
+                {
+                    faceListView.Items.Remove(item);
+                    faceImageList.Images.RemoveAt(i);
+                    Debug.Assert(inputFileListView.SelectedItems.Count == 1);
+                    ((ImageWapper)inputFileListView.SelectedItems[0].Tag).originalFaces.RemoveAt(i);
+                    ((ImageWapper)inputFileListView.SelectedItems[0].Tag).bChecked.RemoveAt(i);
+                    i--;
+                }
+            }
+        }
+
+        private void addFaceBtn_Click(object sender, EventArgs e)
+        {
+
+        }
+        #endregion
+
+        private void faceListView_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (bFaceCheckedChangedBySystem)
+                return;
+            Debug.Assert(inputFileListView.SelectedItems.Count == 1);
+            ImageWapper imageWapper = (ImageWapper)inputFileListView.SelectedItems[0].Tag;
+            imageWapper.bChecked[e.Item.Index] = e.Item.Checked;
+            int nChecked = (int)inputFileListView.SelectedItems[0].SubItems[4].Tag;
+            if (e.Item.Checked)
+                nChecked++;
+            else
+                nChecked--;
+            inputFileListView.SelectedItems[0].SubItems[4].Text = nChecked + " / " + imageWapper.bChecked.Count;
+            inputFileListView.SelectedItems[0].SubItems[4].Tag = nChecked;
+        }
+
+        private void tabControl_Selected(object sender, TabControlEventArgs e)
+        {
+            if (e.TabPageIndex == 1)
+            {
+                createCoverBtn.PerformClick();
+                numberOfSelecedFacesEdit.Text = "" + nFaces;
+            }
         }
     }
 }
